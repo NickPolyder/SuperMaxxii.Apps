@@ -15,9 +15,18 @@ namespace SuperMaxxii.TikTokCounter
 		private static CancellationTokenSource _cancellationTokenSource;
 		
 		private static int? _currentCount;
+		private static Thread _thread;
+		private static EdgeDriver _driver;
+		private static SoundPlayerWrapper _soundWrapper;
+
 		static async Task Main(string[] args)
 		{
+			_cancellationTokenSource = new CancellationTokenSource();
+			
+			SetupResourcesCleaner();
+
 			Console.WriteLine("Starting... ");
+
 			var configuration = new ConfigurationBuilder()
 				.SetBasePath(Directory.GetCurrentDirectory())
 				.AddJsonFile("appsettings.json")
@@ -25,54 +34,73 @@ namespace SuperMaxxii.TikTokCounter
 				.Build();
 
 			var appSettings = GetAppSettings(configuration);
+			
 			PrintSettings(appSettings);
-			_cancellationTokenSource = new CancellationTokenSource();
 
 			Console.CancelKeyPress += Console_CancelKeyPress;
 
-			var driver = GetWebDriver(appSettings);
-
-			try
+			using (_driver = GetWebDriver(appSettings))
 			{
-				driver.Navigate();
-				using (var soundWrapper = new SoundPlayerWrapper())
+				try
 				{
-					do
+					_driver.Navigate();
+					using (_soundWrapper = new SoundPlayerWrapper())
 					{
-						if (_cancellationTokenSource.IsCancellationRequested)
+						do
 						{
-							break;
-						}
+							if (_cancellationTokenSource.IsCancellationRequested)
+							{
+								break;
+							}
 
-						var mainCounter = driver.FindElementByClassName(appSettings.FindClassName);
-						var counter = GetCounter(mainCounter);
-						
-						// double check values;
-						await Task.Delay(TimeSpan.FromSeconds(appSettings.PageLoadDelay), _cancellationTokenSource.Token);
-						
-						counter = Math.Min(counter, GetCounter(mainCounter));
-						
-						if (_currentCount == null)
-						{
-							_currentCount = counter;
-						}else if(counter > _currentCount.Value )
-						{
-							_currentCount = counter;
-							await soundWrapper.PlaySound(appSettings.NotificationSoundPath);
-						}
-						Console.WriteLine(_currentCount.Value);
-						
-						await Task.Delay(TimeSpan.FromSeconds(appSettings.ReloadDelay), _cancellationTokenSource.Token);
+							var mainCounter = _driver.FindElementByClassName(appSettings.FindClassName);
+							var counter = GetCounter(mainCounter);
 
-					} while (!_cancellationTokenSource.IsCancellationRequested);
+							// double check values;
+							await Task.Delay(TimeSpan.FromSeconds(appSettings.PageLoadDelay), _cancellationTokenSource.Token);
+
+							counter = Math.Min(counter, GetCounter(mainCounter));
+
+							if (_currentCount == null)
+							{
+								_currentCount = counter;
+							}
+							else if (counter > _currentCount.Value)
+							{
+								_currentCount = counter;
+								await _soundWrapper.PlaySound(appSettings.NotificationSoundPath);
+							}
+							Console.WriteLine(_currentCount.Value);
+
+							await Task.Delay(TimeSpan.FromSeconds(appSettings.ReloadDelay), _cancellationTokenSource.Token);
+
+						} while (!_cancellationTokenSource.IsCancellationRequested);
+					}
 				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error: {ex.Message}");
+				}
+				_driver.Close();
 			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Error: {ex.Message}");
-			}
+			
 			Console.WriteLine("Exiting....");
 			await Task.Delay(TimeSpan.FromSeconds(1));
+		}
+
+		private static void SetupResourcesCleaner()
+		{
+			_thread = new Thread(new ThreadStart(() =>
+				{
+					WaitHandle.WaitAny(new[] { _cancellationTokenSource.Token.WaitHandle });
+					_driver.Dispose();
+					_soundWrapper.Dispose();
+					
+					Thread.Sleep(5000);
+				}))
+				{IsBackground = false};
+			_thread.Start();
+			AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => { _cancellationTokenSource.Cancel(); };
 		}
 
 		private static void PrintSettings(TikTokCounterSettings appSettings)
@@ -118,7 +146,7 @@ namespace SuperMaxxii.TikTokCounter
 			var edgeOptions = new EdgeOptions
 			{
 				UseChromium = true,
-				LeaveBrowserRunning = true
+				LeaveBrowserRunning = false
 			};
 
 			edgeOptions.AddArgument("headless");
