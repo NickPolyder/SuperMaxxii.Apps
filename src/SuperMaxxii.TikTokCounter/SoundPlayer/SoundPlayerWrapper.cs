@@ -1,13 +1,15 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace SuperMaxxii.TikTokCounter.SoundPlayer
 {
-	public class SoundPlayerWrapper: IDisposable
+	public class SoundPlayerWrapper : IDisposable
 	{
 		private readonly Process _cmd;
-		private const string _FFPlayCommand = ".\\SoundPlayer\\ffplay.exe {0} -nodisp -autoexit -nostats";
+		private const string _FFPlayCommand = ".\\SoundPlayer\\ffplay.exe \"{0}\" -nodisp -autoexit -nostats -loglevel error";
 
 		public SoundPlayerWrapper()
 		{
@@ -18,12 +20,25 @@ namespace SuperMaxxii.TikTokCounter.SoundPlayer
 					FileName = "cmd.exe",
 					RedirectStandardInput = true,
 					RedirectStandardOutput = true,
+					RedirectStandardError = true,
 					CreateNoWindow = true,
-					UseShellExecute = false
-				}
+					UseShellExecute = false,
+
+				},
 			};
+			_cmd.ErrorDataReceived += ErrorDataReceived;
 			_cmd.Start();
+			_cmd.BeginErrorReadLine();
 		}
+
+		private void ErrorDataReceived(object sender, DataReceivedEventArgs e)
+		{
+			if (!string.IsNullOrWhiteSpace(e.Data) && !e.Data.EndsWith("Failed to send close message"))
+			{
+				Console.Error.WriteLine(e.Data);
+			}
+		}
+
 		public async Task PlaySound(string pathToSoundFile)
 		{
 			if (string.IsNullOrWhiteSpace(pathToSoundFile))
@@ -36,6 +51,8 @@ namespace SuperMaxxii.TikTokCounter.SoundPlayer
 
 		public void Dispose()
 		{
+			_cmd.ErrorDataReceived -= ErrorDataReceived;
+			_cmd.CancelErrorRead();
 			_cmd.WaitForExit(5000);
 			_cmd.Dispose();
 		}

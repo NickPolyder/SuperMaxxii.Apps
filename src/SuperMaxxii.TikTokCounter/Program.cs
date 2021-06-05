@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Edge.SeleniumTools;
 using Microsoft.Extensions.Configuration;
+using OpenQA.Selenium;
 using SuperMaxxii.TikTokCounter.SoundPlayer;
 
 namespace SuperMaxxii.TikTokCounter
@@ -12,6 +13,7 @@ namespace SuperMaxxii.TikTokCounter
 	class Program
 	{
 		private static CancellationTokenSource _cancellationTokenSource;
+		
 		private static int? _currentCount;
 		static async Task Main(string[] args)
 		{
@@ -23,6 +25,7 @@ namespace SuperMaxxii.TikTokCounter
 				.Build();
 
 			var appSettings = GetAppSettings(configuration);
+			PrintSettings(appSettings);
 			_cancellationTokenSource = new CancellationTokenSource();
 
 			Console.CancelKeyPress += Console_CancelKeyPress;
@@ -31,33 +34,33 @@ namespace SuperMaxxii.TikTokCounter
 
 			try
 			{
+				driver.Navigate();
 				using (var soundWrapper = new SoundPlayerWrapper())
 				{
 					do
 					{
-						driver.Navigate();
-						await Task.Delay(TimeSpan.FromSeconds(appSettings.PageLoadDelay), _cancellationTokenSource.Token);
-
 						if (_cancellationTokenSource.IsCancellationRequested)
 						{
 							break;
 						}
 
 						var mainCounter = driver.FindElementByClassName(appSettings.FindClassName);
-						var sanitised = Regex.Replace(mainCounter.Text, "\\D", "");
-
-						var counter = int.Parse(sanitised);
-
-						Console.WriteLine(counter);
+						var counter = GetCounter(mainCounter);
+						
+						// double check values;
+						await Task.Delay(TimeSpan.FromSeconds(appSettings.PageLoadDelay), _cancellationTokenSource.Token);
+						
+						counter = Math.Min(counter, GetCounter(mainCounter));
+						
 						if (_currentCount == null)
 						{
 							_currentCount = counter;
-						}
-						else if(counter > _currentCount.Value )
+						}else if(counter > _currentCount.Value )
 						{
 							_currentCount = counter;
 							await soundWrapper.PlaySound(appSettings.NotificationSoundPath);
 						}
+						Console.WriteLine(_currentCount.Value);
 						
 						await Task.Delay(TimeSpan.FromSeconds(appSettings.ReloadDelay), _cancellationTokenSource.Token);
 
@@ -72,6 +75,23 @@ namespace SuperMaxxii.TikTokCounter
 			await Task.Delay(TimeSpan.FromSeconds(1));
 		}
 
+		private static void PrintSettings(TikTokCounterSettings appSettings)
+		{
+			Console.WriteLine("Settings: ");
+			foreach (var propertyInfo in appSettings.GetType().GetProperties())
+			{
+				Console.WriteLine($"\t - {propertyInfo.Name} => {propertyInfo.GetValue(appSettings)}");
+			}
+		}
+
+		private static int GetCounter(IWebElement mainCounter)
+		{
+			var sanitised = Regex.Replace(mainCounter.Text, "\\D", "");
+
+			var counter = int.Parse(sanitised);
+			return counter;
+		}
+
 		private static TikTokCounterSettings GetAppSettings(IConfigurationRoot configuration)
 		{
 			var path = configuration.GetValue<string>("WebDriver:Path") ?? GetDefaultWebDriverPath();
@@ -81,6 +101,7 @@ namespace SuperMaxxii.TikTokCounter
 			return new TikTokCounterSettings
 			{
 				PageLoadDelay = configuration.GetValue<int>("PageLoadDelay"),
+				ReloadDelay = configuration.GetValue<int>("ReloadDelay"),
 				FindClassName = configuration.GetValue<string>("FindByClassName"),
 				TikTokUrl = configuration.GetValue<string>("TikTokUrl"),
 				WebDriver = (path, webDriverName),
